@@ -174,7 +174,7 @@ If no meaningful issues are identified, return an empty findings array.
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const result = await ai.models.generateContent({
-          model: "gemini-3.8-flash",
+          model: "gemini-3.1-flash-lite",
           contents: [
             {
               role: "user",

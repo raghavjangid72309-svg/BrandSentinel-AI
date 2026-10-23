@@ -25,17 +25,10 @@ type ImageResponse = {
   success?: boolean;
   summary?: string;
   findings?: Finding[];
-  needsCorrection?: boolean;
   disclaimer?: string;
   error?: string;
 };
 
-type CorrectionResponse = {
-  success?: boolean;
-  correctedImage?: string;
-  disclaimer?: string;
-  error?: string;
-};
 
 type ReviewHistoryItem = {
   id: string;
@@ -52,6 +45,45 @@ const defaultGuidelines =
   "Use accurate product information. Avoid unsupported claims. " +
   "Maintain a professional and trustworthy tone. " +
   "Do not make guarantees that cannot be substantiated.";
+
+const guidelinePresets = [
+  {
+    name: "Trust-first",
+    description: "Credible, careful, evidence-led",
+    rules:
+      "Use accurate product information and claims supported by evidence. " +
+      "Maintain a professional, transparent, trustworthy tone. " +
+      "Never promise guaranteed outcomes or use misleading urgency. " +
+      "Clearly qualify limitations and avoid unsupported superlatives.",
+  },
+  {
+    name: "Bold & energetic",
+    description: "Confident, lively, action-oriented",
+    rules:
+      "Use confident, energetic language and clear calls to action. " +
+      "Keep every product claim accurate and supportable. " +
+      "Avoid exaggerated guarantees, misleading comparisons, and pressure tactics. " +
+      "Sound ambitious without sacrificing trust.",
+  },
+  {
+    name: "Minimal & premium",
+    description: "Refined, concise, considered",
+    rules:
+      "Use concise, polished language with a calm, premium tone. " +
+      "Avoid slang, excessive punctuation, hype, and cluttered messaging. " +
+      "Use only verified product facts and substantiated claims. " +
+      "Prioritize clarity, precision, and understated confidence.",
+  },
+  {
+    name: "Friendly & accessible",
+    description: "Warm, clear, human",
+    rules:
+      "Use warm, helpful, inclusive language that is easy to understand. " +
+      "Explain benefits clearly without jargon or pressure. " +
+      "Keep all product information accurate and avoid unsupported promises. " +
+      "Be approachable while remaining respectful and professional.",
+  },
+];
 
 const exampleContent =
   "Our product is the best in India and guarantees 100% success " +
@@ -107,10 +139,6 @@ export default function Home() {
   const [imageReviewError, setImageReviewError] = useState("");
   const [imageReview, setImageReview] = useState<ImageResponse | null>(null);
 
-  const [correctedImage, setCorrectedImage] = useState("");
-  const [correctionLoading, setCorrectionLoading] = useState(false);
-  const [correctionError, setCorrectionError] = useState("");
-  const [correctionDisclaimer, setCorrectionDisclaimer] = useState("");
 
   const [history, setHistory] = useState<ReviewHistoryItem[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
@@ -260,9 +288,6 @@ export default function Home() {
 
     setImageReviewError("");
     setImageReview(null);
-    setCorrectedImage("");
-    setCorrectionError("");
-    setCorrectionDisclaimer("");
 
     const allowedTypes = [
       "image/png",
@@ -298,9 +323,6 @@ export default function Home() {
     setImageReviewLoading(true);
     setImageReviewError("");
     setImageReview(null);
-    setCorrectedImage("");
-    setCorrectionError("");
-    setCorrectionDisclaimer("");
 
     try {
       const formData = new FormData();
@@ -332,67 +354,6 @@ export default function Home() {
     } finally {
       setImageReviewLoading(false);
     }
-  }
-
-  async function generateCorrection() {
-    if (!adImage || !imageReview) {
-      setCorrectionError("Review an advertisement before correcting it.");
-      return;
-    }
-
-    const findings = imageReview.findings || [];
-
-    if (findings.length === 0) {
-      setCorrectionError(
-        "No issues were identified. The original image remains unchanged."
-      );
-      return;
-    }
-
-    setCorrectionLoading(true);
-    setCorrectionError("");
-    setCorrectedImage("");
-    setCorrectionDisclaimer("");
-
-    try {
-      const formData = new FormData();
-      formData.append("image", adImage);
-      formData.append("guidelines", brandRules);
-      formData.append("findings", JSON.stringify(findings));
-
-      const response = await fetch("/api/correct-image", {
-        method: "POST",
-        body: formData,
-      });
-
-      const data: CorrectionResponse = await response.json();
-
-      if (!response.ok || !data.success || !data.correctedImage) {
-        throw new Error(data.error || "Image correction failed.");
-      }
-
-      setCorrectedImage(data.correctedImage);
-      setCorrectionDisclaimer(data.disclaimer || "");
-    } catch (error) {
-      setCorrectionError(
-        error instanceof Error
-          ? error.message
-          : "Unable to generate the corrected image."
-      );
-    } finally {
-      setCorrectionLoading(false);
-    }
-  }
-
-  function downloadCorrectedImage() {
-    if (!correctedImage) return;
-
-    const link = document.createElement("a");
-    link.href = correctedImage;
-    link.download = "brandsentinel-corrected-ad.png";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
   }
 
   function downloadAnalysisReport() {
@@ -505,12 +466,6 @@ export default function Home() {
       }
     }
 
-    if (correctedImage) {
-      addParagraph(
-        "Correction status",
-        "An AI-generated corrected creative was produced during this session. The image itself is not embedded in this report."
-      );
-    }
 
     addParagraph(
       "Important Disclaimer",
@@ -542,88 +497,164 @@ export default function Home() {
   const hasReport = Boolean(textSummary || imageReview);
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#080b11] text-slate-100">
+    <main className="brandsentinel-page min-h-screen overflow-x-hidden bg-[#070910] text-slate-100">
+      <style jsx global>{`
+        @keyframes bs-fade-up {
+          from { opacity: 0; transform: translateY(18px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes bs-drift {
+          0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+          50% { transform: translate3d(18px, -20px, 0) scale(1.06); }
+        }
+        @keyframes bs-shimmer {
+          0% { background-position: 0% 50%; }
+          100% { background-position: 200% 50%; }
+        }
+        .bs-enter { animation: bs-fade-up .7s cubic-bezier(.2,.7,.2,1) both; }
+        .bs-delay-1 { animation-delay: .08s; }
+        .bs-delay-2 { animation-delay: .16s; }
+        .bs-delay-3 { animation-delay: .24s; }
+        .bs-orb { animation: bs-drift 11s ease-in-out infinite; }
+        .bs-glass { background: linear-gradient(145deg, rgba(17,24,39,.88), rgba(9,13,23,.88)); box-shadow: 0 24px 80px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.035); backdrop-filter: blur(16px); }
+        .bs-gradient-text { background-size: 200% auto; animation: bs-shimmer 7s linear infinite; }
+        .bs-control { transition: border-color .2s ease, background .2s ease, box-shadow .2s ease, transform .2s ease; }
+        .bs-control:focus { box-shadow: 0 0 0 4px rgba(103,232,249,.07); }
+        .bs-lift { transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
+        .bs-lift:hover { transform: translateY(-3px); border-color: rgba(103,232,249,.2); box-shadow: 0 18px 50px rgba(0,0,0,.18); }
+        @media (prefers-reduced-motion: reduce) {
+          .bs-enter, .bs-orb, .bs-gradient-text { animation: none !important; }
+          .bs-control, .bs-lift { transition: none !important; }
+        }
+      `}</style>
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -left-48 top-0 h-[420px] w-[420px] rounded-full bg-cyan-500/[0.07] blur-[130px]" />
-        <div className="absolute -right-48 top-[380px] h-[480px] w-[480px] rounded-full bg-blue-600/[0.08] blur-[140px]" />
+        <div className="bs-orb absolute -left-48 top-0 h-[420px] w-[420px] rounded-full bg-cyan-400/[0.09] blur-[130px]" />
+        <div className="bs-orb absolute -right-48 top-[380px] h-[480px] w-[480px] rounded-full bg-violet-600/[0.10] blur-[140px]" />
       </div>
 
       <div className="relative mx-auto max-w-[1450px] px-5 py-6 sm:px-8 lg:px-10">
-        <header className="flex flex-wrap items-center justify-between gap-5 border-b border-white/[0.08] pb-6">
-          <a href="#" className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-300/25 bg-cyan-300/10 text-cyan-200">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                className="h-6 w-6"
-                stroke="currentColor"
-                strokeWidth="1.7"
-              >
+        <header className="bs-enter sticky top-3 z-30 mb-2 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/[0.09] bg-[#090d16]/85 px-4 py-3 shadow-2xl shadow-black/20 backdrop-blur-2xl sm:px-5">
+          <a href="#top" className="flex items-center gap-3">
+            <div className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-cyan-200/30 bg-gradient-to-br from-cyan-300/20 via-blue-400/10 to-violet-400/20 text-cyan-100 shadow-[0_0_28px_rgba(34,211,238,0.12)]">
+              <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" stroke="currentColor" strokeWidth="1.7">
                 <path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z" />
                 <path d="m8.5 12 2.2 2.2 4.8-5" />
               </svg>
             </div>
-
             <div>
-              <div className="text-sm font-bold tracking-wide">
-                BrandSentinel <span className="text-cyan-300">AI</span>
-              </div>
-              <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">
-                Brand governance workspace
-              </div>
+              <div className="text-sm font-bold tracking-wide text-white">BrandSentinel <span className="text-cyan-300">AI</span></div>
+              <div className="mt-0.5 text-[9px] uppercase tracking-[0.22em] text-slate-500">Brand intelligence platform</div>
             </div>
           </a>
 
-          <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-2 text-xs text-emerald-300">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
-            Analysis system ready
+          <nav className="hidden items-center gap-6 text-xs font-medium text-slate-400 md:flex">
+            <a href="#overview" className="transition hover:text-white">Overview</a>
+            <a href="#text-review" className="transition hover:text-white">Text analysis</a>
+            <a href="#image-review" className="transition hover:text-white">Visual review</a>
+            <a href="#history" className="transition hover:text-white">History</a>
+          </nav>
+
+          <div className="flex items-center gap-3">
+            <div className="hidden items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-2 text-[10px] text-emerald-300 sm:flex">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+              SYSTEM READY
+            </div>
+            <a href="#text-review" className="rounded-xl bg-white px-4 py-2.5 text-xs font-bold text-slate-950 transition hover:-translate-y-0.5 hover:bg-cyan-100">Start review <span aria-hidden="true">↗</span></a>
           </div>
         </header>
 
-        <section className="grid gap-8 py-12 md:grid-cols-[1fr_auto] md:items-end md:py-16">
-          <div>
-            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200">
-              <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" />
-              Content integrity intelligence
+        <section id="top" className="relative grid min-h-[570px] items-center gap-12 overflow-hidden py-14 sm:py-20 lg:grid-cols-[1.08fr_.92fr] lg:py-24">
+          <div className="pointer-events-none absolute inset-0 -z-10 opacity-30" style={{ backgroundImage: "linear-gradient(rgba(148,163,184,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.07) 1px, transparent 1px)", backgroundSize: "54px 54px", maskImage: "linear-gradient(to bottom, black, transparent 90%)" }} />
+          <div id="overview" className="bs-enter bs-delay-1 relative">
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-3.5 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-100 shadow-[0_0_35px_rgba(34,211,238,0.06)]">
+              <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-300 opacity-60" /><span className="relative inline-flex h-2 w-2 rounded-full bg-cyan-300" /></span>
+              AI-powered brand governance
             </div>
 
-            <h1 className="max-w-3xl text-4xl font-semibold leading-[1.12] tracking-tight sm:text-5xl lg:text-6xl">
-              Keep every message
-              <span className="block bg-gradient-to-r from-cyan-200 via-sky-300 to-blue-400 bg-clip-text text-transparent">
-                on brand.
-              </span>
+            <h1 className="max-w-3xl text-[3.1rem] font-semibold leading-[.98] tracking-[-0.065em] text-white sm:text-6xl lg:text-[5.5rem]">
+              Your brand.
+              <span className="block">Your standards.</span>
+              <span className="bs-gradient-text mt-2 block bg-gradient-to-r from-cyan-200 via-sky-300 to-violet-300 bg-clip-text pb-2 text-transparent">Always aligned.</span>
             </h1>
 
-            <p className="mt-5 max-w-2xl text-sm leading-7 text-slate-400 sm:text-base">
-              Review marketing copy and advertisements against your brand
-              guidelines. Find potential issues and generate a corrected
-              creative for human review.
+            <p className="mt-7 max-w-xl text-sm leading-7 text-slate-400 sm:text-base">
+              Catch risky claims before they go live. BrandSentinel reviews marketing copy and ad creatives against your guidelines, explains what needs attention, and helps your team publish with confidence.
             </p>
-          </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:min-w-[270px]">
-            <div className={`${panel} p-4`}>
-              <div className={labelStyle}>Findings</div>
-              <div className="mt-3 text-3xl font-semibold tabular-nums">
-                {totalIssues}
-              </div>
-              <div className="mt-1 text-xs text-slate-500">
-                Current session
-              </div>
+            <div className="mt-8 flex flex-wrap items-center gap-3">
+              <a href="#text-review" className="group inline-flex items-center gap-3 rounded-xl bg-gradient-to-r from-cyan-200 to-sky-300 px-5 py-3.5 text-sm font-bold text-slate-950 shadow-[0_12px_40px_rgba(34,211,238,.15)] transition hover:-translate-y-1 hover:shadow-[0_18px_45px_rgba(34,211,238,.23)]">
+                Analyze content <span className="transition group-hover:translate-x-1">→</span>
+              </a>
+              <a href="#image-review" className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-5 py-3.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:bg-white/[0.06]">
+                Review an ad <span className="text-slate-500">↗</span>
+              </a>
             </div>
 
-            <div className={`${panel} p-4`}>
-              <div className={labelStyle}>Modules</div>
-              <div className="mt-3 text-3xl font-semibold">02</div>
-              <div className="mt-1 text-xs text-slate-500">
-                Text + visual
+            <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-white/[0.08] pt-6 text-xs text-slate-500">
+              <span className="flex items-center gap-2"><span className="text-cyan-300">✳</span> Claims & messaging checks</span>
+              <span className="flex items-center gap-2"><span className="text-violet-300">◈</span> Visual ad review</span>
+              <span className="flex items-center gap-2"><span className="text-emerald-300">✓</span> Human-in-the-loop</span>
+            </div>
+          </div>
+
+          <div className="bs-enter bs-delay-2 relative mx-auto w-full max-w-[520px]">
+            <div className="bs-orb pointer-events-none absolute -inset-5 rounded-[2.5rem] bg-gradient-to-br from-cyan-400/10 via-blue-500/10 to-violet-500/15 blur-2xl" />
+            <div className="bs-glass relative overflow-hidden rounded-[1.75rem] border border-white/[0.12] p-4 shadow-[0_35px_100px_rgba(0,0,0,.45)] sm:p-5">
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-300/[0.08] text-cyan-200">✳</div>
+                  <div><div className="text-xs font-semibold text-white">Brand integrity scan</div><div className="mt-1 text-[10px] text-slate-500">Campaign preview · Sample interface</div></div>
+                </div>
+                <span className="rounded-full border border-emerald-300/20 bg-emerald-300/[0.07] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wider text-emerald-200">Ready</span>
               </div>
+
+              <div className="mt-5 rounded-2xl border border-white/[0.08] bg-[#080c14] p-4 sm:p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Campaign copy</span>
+                  <span className="text-[10px] text-slate-600">PREVIEW</span>
+                </div>
+                <div className="mt-5 text-2xl font-semibold leading-tight tracking-tight text-white">Make every launch <span className="text-cyan-200">count.</span></div>
+                <p className="mt-3 max-w-sm text-xs leading-6 text-slate-500">A sample campaign preview to illustrate how content can be reviewed before publishing.</p>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <span className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.06] px-2.5 py-1.5 text-[10px] text-cyan-100">Brand voice</span>
+                  <span className="rounded-lg border border-violet-300/15 bg-violet-300/[0.06] px-2.5 py-1.5 text-[10px] text-violet-100">Claim review</span>
+                  <span className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5 text-[10px] text-slate-400">Visual consistency</span>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-4">
+                  <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-cyan-300" /> Session findings</div>
+                  <div className="mt-3 text-3xl font-semibold tracking-tight text-white">{totalIssues.toString().padStart(2, "0")}</div>
+                  <div className="mt-1 text-[10px] text-slate-500">Detected in current session</div>
+                </div>
+                <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-4">
+                  <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-violet-300" /> Review modes</div>
+                  <div className="mt-3 text-3xl font-semibold tracking-tight text-white">02</div>
+                  <div className="mt-1 text-[10px] text-slate-500">Text + creative</div>
+                </div>
+              </div>
+              <div className="mt-4 flex items-center gap-3 rounded-xl border border-emerald-300/15 bg-emerald-300/[0.04] p-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-300/10 text-emerald-200">✓</div>
+                <div className="min-w-0 flex-1"><div className="text-xs font-medium text-emerald-100">Human review stays in control</div><div className="mt-1 text-[10px] leading-4 text-slate-500">AI flags potential issues; your team makes the final call.</div></div>
+                <span className="text-emerald-200">↗</span>
+              </div>
+            </div>
+            <div className="absolute -right-3 top-20 hidden rounded-xl border border-cyan-200/15 bg-[#101827]/95 px-3 py-2.5 shadow-xl sm:block">
+              <div className="text-[9px] uppercase tracking-widest text-slate-500">Protection layer</div>
+              <div className="mt-1 text-xs font-semibold text-cyan-100">Brand-aware review</div>
             </div>
           </div>
         </section>
 
+        <section className="bs-enter bs-delay-3 mb-8 grid gap-3 sm:grid-cols-3">
+          <div className="bs-lift rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4"><div className="text-xs font-semibold text-slate-200">01 <span className="ml-2 text-slate-400">Set your standards</span></div><p className="mt-2 text-xs leading-5 text-slate-500">Add approved claims, tone of voice, and brand rules.</p></div>
+          <div className="bs-lift rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4"><div className="text-xs font-semibold text-slate-200">02 <span className="ml-2 text-slate-400">Review content</span></div><p className="mt-2 text-xs leading-5 text-slate-500">Analyze copy or upload an advertisement creative.</p></div>
+          <div className="bs-lift rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4"><div className="text-xs font-semibold text-slate-200">03 <span className="ml-2 text-slate-400">Act on findings</span></div><p className="mt-2 text-xs leading-5 text-slate-500">Read evidence, recommendations, and export a report.</p></div>
+        </section>
+
         {hasReport && (
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-300/15 bg-cyan-300/[0.04] p-4">
+          <div className="bs-enter mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-300/15 bg-gradient-to-r from-cyan-300/[0.06] to-violet-400/[0.04] p-4">
             <div>
               <div className="text-sm font-medium text-slate-100">
                 Analysis report ready
@@ -644,7 +675,7 @@ export default function Home() {
         )}
 
         {/* Review History */}
-        <section className={`${panel} mb-5 p-5 sm:p-7`}>
+        <section id="history" className={`${panel} bs-glass bs-enter bs-delay-2 mb-5 scroll-mt-28 p-5 sm:p-7`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <div className={labelStyle}>Workspace / 03</div>
@@ -695,7 +726,7 @@ export default function Home() {
               {history.map((item) => (
                 <details
                   key={item.id}
-                  className="group rounded-xl border border-white/[0.08] bg-[#0b0f17] p-4"
+                  className="bs-lift group rounded-xl border border-white/[0.08] bg-[#0b0f17]/90 p-4"
                 >
                   <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
@@ -759,9 +790,13 @@ export default function Home() {
           )}
         </section>
 
-        <div className="grid gap-5 xl:grid-cols-2">
+        <div className="mb-5 mt-12 flex flex-wrap items-end justify-between gap-4">
+          <div><div className={labelStyle}>The workspace</div><h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">Put every campaign to the test.</h2><p className="mt-2 text-sm text-slate-500">One place to review copy, creatives, and past findings.</p></div>
+          <span className="rounded-full border border-white/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-slate-500">Live workspace</span>
+        </div>
+        <div className="grid scroll-mt-28 gap-5 xl:grid-cols-2">
           {/* Text analysis */}
-          <section className={`${panel} p-5 sm:p-7`}>
+          <section id="text-review" className={`${panel} bs-glass bs-enter bs-delay-3 scroll-mt-28 p-5 sm:p-7`}>
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <div className={labelStyle}>Workspace / 01</div>
@@ -777,9 +812,41 @@ export default function Home() {
               </span>
             </div>
 
-            <label htmlFor="brand-guidelines" className="mb-2 block text-sm font-medium">
-              Brand guidelines
-            </label>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <label htmlFor="brand-guidelines" className="block text-sm font-medium">
+                Brand guidelines
+              </label>
+              <span className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                Quick-start voice presets
+              </span>
+            </div>
+
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              {guidelinePresets.map((preset) => {
+                const selected = brandRules === preset.rules;
+                return (
+                  <button
+                    key={preset.name}
+                    type="button"
+                    onClick={() => setBrandRules(preset.rules)}
+                    aria-pressed={selected}
+                    className={`rounded-xl border p-3 text-left transition duration-200 hover:-translate-y-0.5 ${
+                      selected
+                        ? "border-cyan-300/40 bg-cyan-300/[0.08] shadow-[0_0_24px_rgba(34,211,238,0.06)]"
+                        : "border-white/[0.08] bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]"
+                    }`}
+                  >
+                    <span className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-100">
+                      {preset.name}
+                      {selected && <span className="text-cyan-200">✓</span>}
+                    </span>
+                    <span className="mt-1 block text-[10px] leading-4 text-slate-500">
+                      {preset.description}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
 
             <textarea
               id="brand-guidelines"
@@ -788,7 +855,7 @@ export default function Home() {
               maxLength={5000}
               rows={4}
               placeholder="Enter your brand voice, approved claims, and restrictions..."
-              className="w-full resize-y rounded-xl border border-white/10 bg-[#090d14] px-4 py-3 text-sm leading-6 text-slate-200 outline-none transition placeholder:text-slate-600 focus:border-cyan-300/50"
+              className="bs-control w-full resize-y rounded-xl border border-white/10 bg-[#080c14]/90 px-4 py-3 text-sm leading-6 text-slate-200 outline-none placeholder:text-slate-600 focus:border-cyan-300/50"
             />
 
             <div className="mb-6 mt-2 text-right text-[10px] text-slate-500">
@@ -806,7 +873,7 @@ export default function Home() {
               maxLength={15000}
               rows={5}
               placeholder="Paste your advertisement copy, product description, or campaign..."
-              className="w-full resize-y rounded-xl border border-white/10 bg-[#090d14] px-4 py-3 text-sm leading-6 text-slate-200 outline-none transition placeholder:text-slate-600 focus:border-cyan-300/50"
+              className="bs-control w-full resize-y rounded-xl border border-white/10 bg-[#080c14]/90 px-4 py-3 text-sm leading-6 text-slate-200 outline-none placeholder:text-slate-600 focus:border-cyan-300/50"
             />
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
@@ -822,7 +889,7 @@ export default function Home() {
                 type="button"
                 onClick={analyzeContent}
                 disabled={textLoading || !content.trim() || !brandRules.trim()}
-                className="rounded-xl bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                className="bs-control rounded-xl bg-gradient-to-r from-cyan-200 to-sky-300 px-5 py-3 text-sm font-semibold text-slate-950 shadow-[0_8px_30px_rgba(34,211,238,0.12)] hover:-translate-y-0.5 hover:shadow-[0_12px_35px_rgba(34,211,238,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {textLoading ? "Analyzing content..." : "Analyze content →"}
               </button>
@@ -873,7 +940,7 @@ export default function Home() {
           </section>
 
           {/* Image analysis */}
-          <section className={`${panel} p-5 sm:p-7`}>
+          <section id="image-review" className={`${panel} bs-glass bs-enter bs-delay-3 scroll-mt-28 p-5 sm:p-7`}>
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <div className={labelStyle}>Visual intelligence / 02</div>
@@ -881,7 +948,7 @@ export default function Home() {
                   Advertisement review
                 </h2>
                 <p className="mt-2 text-sm text-slate-400">
-                  Inspect a creative and address the detected issues.
+                  Inspect an ad creative for visual and messaging risks.
                 </p>
               </div>
               <span className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] text-slate-400">
@@ -903,7 +970,7 @@ export default function Home() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="group flex min-h-[160px] w-full flex-col items-center justify-center rounded-xl border border-dashed border-white/15 bg-[#090d14] p-6 text-center transition hover:border-cyan-300/40 hover:bg-cyan-300/[0.025]"
+              className="bs-control group flex min-h-[180px] w-full flex-col items-center justify-center rounded-2xl border border-dashed border-white/15 bg-[#080c14]/80 p-6 text-center hover:border-cyan-300/40 hover:bg-cyan-300/[0.035]"
             >
               <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-300/[0.07] text-cyan-200">
                 <svg
@@ -938,7 +1005,7 @@ export default function Home() {
               type="button"
               onClick={reviewAdvertisement}
               disabled={imageReviewLoading || !adImage || !brandRules.trim()}
-              className="mt-4 w-full rounded-xl border border-cyan-300/25 bg-cyan-300/[0.08] px-4 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/[0.14] disabled:cursor-not-allowed disabled:opacity-50"
+              className="bs-control mt-4 w-full rounded-xl border border-cyan-300/25 bg-gradient-to-r from-cyan-300/[0.10] to-violet-400/[0.08] px-4 py-3 text-sm font-semibold text-cyan-100 hover:-translate-y-0.5 hover:border-cyan-200/40 hover:bg-cyan-300/[0.14] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {imageReviewLoading
                 ? "Reviewing advertisement..."
@@ -985,7 +1052,7 @@ export default function Home() {
                   ))}
                 </div>
 
-                {imageFindings.length === 0 ? (
+                {imageFindings.length === 0 && (
                   <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
                     <div className="text-sm font-medium text-emerald-200">
                       No meaningful issues identified
@@ -994,102 +1061,6 @@ export default function Home() {
                       The original advertisement remains unchanged. This
                       preliminary AI review is not a guarantee of compliance.
                     </p>
-                  </div>
-                ) : (
-                  <div className="mt-5 rounded-xl border border-amber-300/20 bg-amber-300/[0.04] p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium text-amber-200">
-                      <span className="h-2 w-2 rounded-full bg-amber-300" />
-                      Correction recommended
-                    </div>
-
-                    <p className="mt-2 text-xs leading-5 text-slate-400">
-                      Generate a revised creative using the findings and your
-                      brand guidelines. Review the result before publishing.
-                    </p>
-
-                    <button
-                      type="button"
-                      onClick={generateCorrection}
-                      disabled={correctionLoading}
-                      className="mt-4 w-full rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {correctionLoading
-                        ? "Generating corrected creative..."
-                        : "✦ Generate correction"}
-                    </button>
-
-                    {correctionLoading && (
-                      <LoadingMessage message="The image model is generating a revised creative. This may take a little while." />
-                    )}
-
-                    {correctionError && (
-                      <ErrorMessage message={correctionError} />
-                    )}
-
-                    {correctedImage && (
-                      <div className="mt-6">
-                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <div className={labelStyle}>
-                              Generated creative
-                            </div>
-                            <h4 className="mt-2 font-semibold text-emerald-200">
-                              Correction generated
-                            </h4>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={downloadCorrectedImage}
-                            className="rounded-lg border border-cyan-300/25 px-3 py-2 text-xs font-medium text-cyan-100 hover:bg-cyan-300/10"
-                          >
-                            ↓ Download image
-                          </button>
-                        </div>
-
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          <div className="min-w-0">
-                            <div className="mb-2 text-xs font-medium text-slate-400">
-                              Original
-                            </div>
-                            <div className="overflow-hidden rounded-xl border border-white/10 bg-[#090d14]">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={imagePreview}
-                                alt="Original advertisement"
-                                className="w-full object-contain"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="min-w-0">
-                            <div className="mb-2 text-xs font-medium text-cyan-200">
-                              AI-corrected version
-                            </div>
-                            <div className="overflow-hidden rounded-xl border border-cyan-300/20 bg-[#090d14]">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={correctedImage}
-                                alt="AI-generated corrected advertisement"
-                                className="w-full object-contain"
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        {correctionDisclaimer && (
-                          <p className="mt-4 text-xs leading-5 text-slate-400">
-                            {correctionDisclaimer}
-                          </p>
-                        )}
-
-                        <p className="mt-3 text-xs leading-5 text-amber-200/80">
-                          Before publication, manually verify all text,
-                          spelling, logos, product details, and claims.
-                          Generated images may alter these elements.
-                        </p>
-                      </div>
-                    )}
                   </div>
                 )}
 
@@ -1114,7 +1085,7 @@ export default function Home() {
 
 function FindingCard({ finding }: { finding: Finding }) {
   return (
-    <article className="rounded-xl border border-white/[0.08] bg-[#0b0f17] p-4">
+    <article className="bs-lift rounded-xl border border-white/[0.08] bg-[#0b0f17]/90 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h4 className="text-sm font-medium leading-6 text-slate-200">
           {finding.issue}

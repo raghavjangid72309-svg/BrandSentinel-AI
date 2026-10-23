@@ -13,7 +13,13 @@ type Finding = {
 
 type RecordData = Record<string, unknown>;
 
+type AnalysisResult = {
+  text?: string;
+};
+
 const SEVERITIES = ["High", "Medium", "Low"] as const;
+const MODEL = "gemini-3.1-flash-lite";
+const MAX_ATTEMPTS = 3;
 
 function isRecord(value: unknown): value is RecordData {
   return (
@@ -33,6 +39,73 @@ function isFinding(value: unknown): value is RecordData {
   );
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTemporaryError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const err = error as {
+    status?: number;
+    code?: number | string;
+    message?: string;
+  };
+
+  const message = err.message ?? "";
+
+  return (
+    err.status === 503 ||
+    err.status === 429 ||
+    err.code === 503 ||
+    err.code === 429 ||
+    err.code === "UNAVAILABLE" ||
+    err.code === "RESOURCE_EXHAUSTED" ||
+    message.includes("UNAVAILABLE") ||
+    message.includes("high demand") ||
+    message.includes("RESOURCE_EXHAUSTED") ||
+    message.includes("429")
+  );
+}
+
+async function generateAnalysis(
+  ai: GoogleGenAI,
+  prompt: string
+): Promise<AnalysisResult> {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      const result = await ai.models.generateContent({
+        model: MODEL,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          maxOutputTokens: 1200,
+          temperature: 0.2,
+        },
+      });
+
+      return { text: result.text };
+    } catch (error: unknown) {
+      const lastAttempt = attempt === MAX_ATTEMPTS - 1;
+
+      if (!isTemporaryError(error) || lastAttempt) {
+        throw error;
+      }
+
+      const delay = 1000 * (attempt + 1);
+      console.warn(
+        `Gemini temporarily unavailable. Retry ${attempt + 1}/${MAX_ATTEMPTS - 1} in ${delay}ms.`
+      );
+
+      await sleep(delay);
+    }
+  }
+
+  throw new Error("The AI service did not return a result.");
+}
+
 export async function POST(request: Request) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -44,7 +117,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const body: unknown = await request.json();
+    let body: unknown;
+
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Request body must contain valid JSON." },
+        { status: 400 }
+      );
+    }
 
     if (!isRecord(body)) {
       return NextResponse.json(
@@ -66,7 +148,8 @@ export async function POST(request: Request) {
     if (!guidelines || !content) {
       return NextResponse.json(
         {
-          error: "Enter both brand guidelines and marketing content.",
+          error:
+            "Enter both brand guidelines and marketing content.",
         },
         { status: 400 }
       );
@@ -74,7 +157,10 @@ export async function POST(request: Request) {
 
     if (guidelines.length > 5000 || content.length > 15000) {
       return NextResponse.json(
-        { error: "The submitted text exceeds the character limit." },
+        {
+          error:
+            "The submitted text exceeds the character limit.",
+        },
         { status: 400 }
       );
     }
@@ -115,23 +201,20 @@ Return JSON only:
 }
 `;
 
-    const result = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        maxOutputTokens: 1200,
-        temperature: 0.2,
-      },
-    });
-
+    const result = await generateAnalysis(ai, prompt);
     const responseText = result.text;
 
     if (!responseText) {
       throw new Error("The AI returned an empty response.");
     }
 
-    const parsed: unknown = JSON.parse(responseText);
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(responseText);
+    } catch {
+      throw new Error("The AI returned invalid JSON.");
+    }
 
     if (
       !isRecord(parsed) ||
@@ -165,17 +248,11 @@ Return JSON only:
   } catch (error: unknown) {
     console.error("BrandSentinel analysis error:", error);
 
-    const message =
-      error instanceof Error ? error.message : "";
-
-    if (
-      message.includes("503") ||
-      message.includes("UNAVAILABLE")
-    ) {
+    if (isTemporaryError(error)) {
       return NextResponse.json(
         {
           error:
-            "The AI service is temporarily busy. Please try again shortly.",
+            "The AI service is temporarily busy or its quota is limited. Please try again shortly.",
         },
         { status: 503 }
       );

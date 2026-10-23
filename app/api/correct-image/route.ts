@@ -1,3 +1,4 @@
+
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 
@@ -7,7 +8,11 @@ const ALLOWED_TYPES = [
   "image/png",
   "image/jpeg",
   "image/webp",
-];
+] as const;
+
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+const MAX_GUIDELINES_LENGTH = 5000;
+const MAX_FINDINGS = 30;
 
 type Finding = {
   issue: string;
@@ -15,6 +20,62 @@ type Finding = {
   evidence: string;
   recommendation: string;
 };
+
+function getErrorDetails(error: unknown) {
+  if (error instanceof Error) {
+    const candidate = error as Error & {
+      status?: number;
+      statusCode?: number;
+      code?: string | number;
+    };
+
+    return {
+      message: error.message,
+      status:
+        candidate.status ??
+        candidate.statusCode ??
+        undefined,
+      code: candidate.code,
+    };
+  }
+
+  return {
+    message: String(error ?? "Unknown error"),
+    status: undefined,
+    code: undefined,
+  };
+}
+
+function isQuotaError(
+  message: string,
+  status?: number,
+  code?: string | number
+) {
+  const text = `${message} ${code ?? ""}`.toLowerCase();
+
+  return (
+    status === 429 ||
+    text.includes("resource_exhausted") ||
+    text.includes("quota") ||
+    text.includes("rate limit") ||
+    text.includes("too many requests")
+  );
+}
+
+function isUnavailableError(
+  message: string,
+  status?: number,
+  code?: string | number
+) {
+  const text = `${message} ${code ?? ""}`.toLowerCase();
+
+  return (
+    status === 503 ||
+    status === 502 ||
+    text.includes("unavailable") ||
+    text.includes("overloaded")
+  );
+}
 
 export async function POST(request: Request) {
   try {
@@ -27,7 +88,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const formData = await request.formData();
+    let formData: FormData;
+
+    try {
+      formData = await request.formData();
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid form data. Please upload the image again." },
+        { status: 400 }
+      );
+    }
 
     const image = formData.get("image");
     const guidelines = formData.get("guidelines");
@@ -40,14 +110,18 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!ALLOWED_TYPES.includes(image.type)) {
+    if (
+      !ALLOWED_TYPES.includes(
+        image.type as (typeof ALLOWED_TYPES)[number]
+      )
+    ) {
       return NextResponse.json(
         { error: "Use a PNG, JPG, or WEBP image." },
         { status: 400 }
       );
     }
 
-    if (image.size === 0 || image.size > 5 * 1024 * 1024) {
+    if (image.size === 0 || image.size > MAX_IMAGE_SIZE) {
       return NextResponse.json(
         { error: "Image must be smaller than 5 MB." },
         { status: 400 }
@@ -57,10 +131,10 @@ export async function POST(request: Request) {
     if (
       typeof guidelines !== "string" ||
       !guidelines.trim() ||
-      guidelines.length > 5000
+      guidelines.length > MAX_GUIDELINES_LENGTH
     ) {
       return NextResponse.json(
-        { error: "Provide valid brand guidelines." },
+        { error: "Provide valid brand guidelines (maximum 5000 characters)." },
         { status: 400 }
       );
     }
@@ -81,7 +155,7 @@ export async function POST(request: Request) {
         throw new Error("Findings must be an array.");
       }
 
-      findings = parsed.filter((item: unknown) => {
+      findings = parsed.filter((item: unknown): item is Finding => {
         if (typeof item !== "object" || item === null) {
           return false;
         }
@@ -118,7 +192,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (findings.length > 30) {
+    if (findings.length > MAX_FINDINGS) {
       return NextResponse.json(
         { error: "Too many findings to process." },
         { status: 400 }
@@ -160,6 +234,9 @@ EDITING REQUIREMENTS:
 
     const ai = new GoogleGenAI({ apiKey });
 
+    // Keep the existing image-generation model.
+    // A 429 response is handled below; changing models does not
+    // automatically increase the project's available quota.
     const result = await ai.interactions.create({
       model: "gemini-nano-banana-2.1",
       input: [
@@ -178,14 +255,12 @@ EDITING REQUIREMENTS:
     let generatedImage: string | null = null;
     let generatedMimeType = "image/png";
 
-    // Prefer the final output image when the SDK exposes it.
     const outputImage = result.output_image;
 
     if (outputImage?.data) {
       generatedImage = outputImage.data;
       generatedMimeType = outputImage.mime_type || "image/png";
     } else {
-      // Fallback: inspect model output blocks.
       for (const step of result.steps ?? []) {
         if (step.type !== "model_output") continue;
 
@@ -199,10 +274,14 @@ EDITING REQUIREMENTS:
     }
 
     if (!generatedImage) {
+      console.error(
+        "Image generation returned no image output."
+      );
+
       return NextResponse.json(
         {
           error:
-            "The image model did not return an edited image. Please try again.",
+            "The image model did not return an edited image. The original image has not been changed.",
         },
         { status: 502 }
       );
@@ -215,31 +294,45 @@ EDITING REQUIREMENTS:
         "AI-generated correction. Check all text, logos, product details, and claims before publication.",
     });
   } catch (error: unknown) {
-    console.error("BrandSentinel image correction failed.");
+    const details = getErrorDetails(error);
 
-    const message =
-      error instanceof Error ? error.message : "";
+    // Server logs help diagnose the real API failure.
+    // Do not log API keys, request headers, or uploaded image data.
+    console.error("BrandSentinel image correction failed:", {
+      message: details.message,
+      status: details.status,
+      code: details.code,
+    });
 
     if (
-      message.includes("429") ||
-      message.includes("RESOURCE_EXHAUSTED")
+      isQuotaError(
+        details.message,
+        details.status,
+        details.code
+      )
     ) {
       return NextResponse.json(
         {
           error:
-            "The image generation quota may have been reached. Check your API usage and try again later.",
+            "Image generation is temporarily rate-limited or its quota has been reached. Check your Google AI Studio usage and try again when the limit resets.",
+          code: "IMAGE_GENERATION_LIMIT",
         },
         { status: 429 }
       );
     }
 
     if (
-      message.includes("503") ||
-      message.includes("UNAVAILABLE")
+      isUnavailableError(
+        details.message,
+        details.status,
+        details.code
+      )
     ) {
       return NextResponse.json(
         {
-          error: "The AI service is busy. Please try again shortly.",
+          error:
+            "The image-generation service is temporarily unavailable or busy. Please try again later.",
+          code: "IMAGE_GENERATION_UNAVAILABLE",
         },
         { status: 503 }
       );
@@ -248,7 +341,8 @@ EDITING REQUIREMENTS:
     return NextResponse.json(
       {
         error:
-          "Image correction failed. Check the server terminal for details.",
+          "Image correction failed. Check the server terminal for the diagnostic message.",
+        code: "IMAGE_CORRECTION_FAILED",
       },
       { status: 500 }
     );
