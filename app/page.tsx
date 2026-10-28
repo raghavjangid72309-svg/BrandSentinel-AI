@@ -146,6 +146,47 @@ function isHistoryItem(value: unknown): value is ReviewHistoryItem {
   );
 }
 
+type ComplianceCategory = "Claims & accuracy" | "Brand voice" | "Restricted language" | "Other risks";
+
+function getComplianceCategory(finding: Finding): ComplianceCategory {
+  const text = `${finding.issue} ${finding.evidence} ${finding.recommendation}`.toLowerCase();
+
+  if (/claim|guarantee|evidence|substantiat|accurac|mislead|fact|proof|success rate|best in/.test(text)) {
+    return "Claims & accuracy";
+  }
+  if (/tone|voice|style|professional|friendly|premium|slang|wording|messaging/.test(text)) {
+    return "Brand voice";
+  }
+  if (/restrict|prohibit|banned|forbidden|term|phrase|urgency|pressure|absolute/.test(text)) {
+    return "Restricted language";
+  }
+  return "Other risks";
+}
+
+function getComplianceScore(findings: Finding[]) {
+  const penaltyBySeverity: Record<Severity, number> = {
+    High: 20,
+    Medium: 10,
+    Low: 4,
+  };
+  const score = Math.max(
+    0,
+    Math.min(100, 100 - findings.reduce((total, finding) => total + penaltyBySeverity[finding.severity], 0))
+  );
+  const categories: ComplianceCategory[] = [
+    "Claims & accuracy",
+    "Brand voice",
+    "Restricted language",
+    "Other risks",
+  ];
+  const breakdown = categories.map((category) => {
+    const matching = findings.filter((finding) => getComplianceCategory(finding) === category);
+    const penalty = matching.reduce((total, finding) => total + penaltyBySeverity[finding.severity], 0);
+    return { category, count: matching.length, penalty };
+  });
+  return { score, breakdown, penalty: 100 - score };
+}
+
 export default function Home() {
   const [brandRules, setBrandRules] = useState(defaultGuidelines);
   const [content, setContent] = useState(exampleContent);
@@ -576,6 +617,8 @@ export default function Home() {
       addHeading("Text Analysis");
       addParagraph("Marketing content", content);
       addParagraph("Summary", textSummary);
+      const textCompliance = getComplianceScore(textFindings);
+      addParagraph("Explainable compliance score", `${textCompliance.score}/100 (deductions: ${textCompliance.penalty}). High findings deduct 20 points, Medium 10, Low 4. This is a heuristic based on AI findings, not a certification.`);
       addFindings("Text Findings", textFindings);
 
       if (textDisclaimer) {
@@ -586,6 +629,8 @@ export default function Home() {
     if (imageReview) {
       addHeading("Advertisement Review");
       addParagraph("Summary", imageReview.summary || "");
+      const visualCompliance = getComplianceScore(imageReview.findings || []);
+      addParagraph("Explainable compliance score", `${visualCompliance.score}/100 (deductions: ${visualCompliance.penalty}). High findings deduct 20 points, Medium 10, Low 4. This is a heuristic based on AI findings, not a certification.`);
       addFindings("Visual Findings", imageReview.findings || []);
 
       if (imageReview.disclaimer) {
@@ -1088,6 +1133,8 @@ export default function Home() {
                   <SeverityCounts counts={textCounts} />
                 </div>
 
+                <ComplianceScoreCard findings={textFindings} />
+
                 {textSummary && (
                   <p className="mt-4 rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 text-sm leading-6 text-slate-300">
                     {textSummary}
@@ -1224,6 +1271,8 @@ export default function Home() {
                   <SeverityCounts counts={imageCounts} />
                 </div>
 
+                <ComplianceScoreCard findings={imageFindings} />
+
                 {imageReview.summary && (
                   <p className="mt-4 rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 text-sm leading-6 text-slate-300">
                     {imageReview.summary}
@@ -1264,6 +1313,49 @@ export default function Home() {
         </footer>
       </div>
     </main>
+  );
+}
+
+function ComplianceScoreCard({ findings }: { findings: Finding[] }) {
+  const result = getComplianceScore(findings);
+  const status = result.score >= 85 ? "Strong alignment" : result.score >= 65 ? "Needs review" : "High attention needed";
+  const scoreColor = result.score >= 85 ? "text-emerald-300" : result.score >= 65 ? "text-amber-300" : "text-red-300";
+  const barColor = result.score >= 85 ? "bg-emerald-300" : result.score >= 65 ? "bg-amber-300" : "bg-red-300";
+
+  return (
+    <section className="mt-4 rounded-2xl border border-white/[0.09] bg-[#090d16]/80 p-4 sm:p-5" aria-label="Explainable brand compliance score">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Explainable compliance score</div>
+          <div className={`mt-2 text-4xl font-semibold tracking-tight ${scoreColor}`}>
+            {result.score}<span className="text-lg text-slate-500">/100</span>
+          </div>
+          <div className={`mt-1 text-xs font-medium ${scoreColor}`}>{status}</div>
+        </div>
+        <div className="max-w-xs text-xs leading-5 text-slate-500">
+          Starts at 100. Each High finding deducts 20 points, Medium deducts 10, and Low deducts 4. The score is a transparent heuristic based on AI findings, not a legal or objective certification.
+        </div>
+      </div>
+
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/[0.08]">
+        <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${result.score}%` }} />
+      </div>
+
+      <div className="mt-5 grid gap-2 sm:grid-cols-2">
+        {result.breakdown.map((item) => (
+          <div key={item.category} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-slate-300">{item.category}</span>
+              <span className="text-xs tabular-nums text-slate-400">{item.count} finding{item.count === 1 ? "" : "s"}</span>
+            </div>
+            <div className="mt-1 text-[10px] text-slate-500">Score deductions: {item.penalty} points</div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[10px] leading-4 text-slate-500">
+        Categories are estimated from finding text. Review the evidence and recommendations before making publication decisions.
+      </p>
+    </section>
   );
 }
 
