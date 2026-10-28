@@ -40,6 +40,29 @@ type ReviewHistoryItem = {
 
 const HISTORY_KEY = "brandsentinel-review-history-v1";
 const MAX_HISTORY_ITEMS = 50;
+const BRAND_PROFILES_KEY = "brandsentinel-brand-profiles-v1";
+
+type BrandProfile = {
+  id: string;
+  name: string;
+  approvedClaims: string;
+  restrictedTerms: string;
+  toneRules: string;
+  guidelines: string;
+};
+
+function isBrandProfile(value: unknown): value is BrandProfile {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<BrandProfile>;
+  return (
+    typeof item.id === "string" &&
+    typeof item.name === "string" &&
+    typeof item.approvedClaims === "string" &&
+    typeof item.restrictedTerms === "string" &&
+    typeof item.toneRules === "string" &&
+    typeof item.guidelines === "string"
+  );
+}
 
 const defaultGuidelines =
   "Use accurate product information. Avoid unsupported claims. " +
@@ -127,6 +150,15 @@ export default function Home() {
   const [brandRules, setBrandRules] = useState(defaultGuidelines);
   const [content, setContent] = useState(exampleContent);
 
+  const [brandProfiles, setBrandProfiles] = useState<BrandProfile[]>([]);
+  const [profilesLoaded, setProfilesLoaded] = useState(false);
+  const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [profileName, setProfileName] = useState("");
+  const [approvedClaims, setApprovedClaims] = useState("");
+  const [restrictedTerms, setRestrictedTerms] = useState("");
+  const [toneRules, setToneRules] = useState("");
+  const [profileMessage, setProfileMessage] = useState("");
+
   const [textLoading, setTextLoading] = useState(false);
   const [textError, setTextError] = useState("");
   const [textSummary, setTextSummary] = useState("");
@@ -182,6 +214,33 @@ export default function Home() {
     }
   }, [history, historyLoaded]);
 
+  // Load saved brand profiles from this browser.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(BRAND_PROFILES_KEY);
+      if (saved) {
+        const parsed: unknown = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setBrandProfiles(parsed.filter(isBrandProfile));
+        }
+      }
+    } catch {
+      console.warn("Could not load saved brand profiles.");
+    } finally {
+      setProfilesLoaded(true);
+    }
+  }, []);
+
+  // Persist profiles after the initial load, avoiding overwriting storage on startup.
+  useEffect(() => {
+    if (!profilesLoaded) return;
+    try {
+      window.localStorage.setItem(BRAND_PROFILES_KEY, JSON.stringify(brandProfiles));
+    } catch {
+      setProfileMessage("Could not save profiles. Browser storage may be full.");
+    }
+  }, [brandProfiles, profilesLoaded]);
+
   useEffect(() => {
     return () => {
       if (imagePreview.startsWith("blob:")) {
@@ -189,6 +248,74 @@ export default function Home() {
       }
     };
   }, [imagePreview]);
+
+  function applyBrandProfile(profile: BrandProfile) {
+    setSelectedProfileId(profile.id);
+    setProfileName(profile.name);
+    setApprovedClaims(profile.approvedClaims);
+    setRestrictedTerms(profile.restrictedTerms);
+    setToneRules(profile.toneRules);
+    setBrandRules(profile.guidelines);
+    const additions = [
+      profile.approvedClaims.trim() ? `Approved claims and facts:\n${profile.approvedClaims.trim()}` : "",
+      profile.restrictedTerms.trim() ? `Restricted words and phrases:\n${profile.restrictedTerms.trim()}` : "",
+      profile.toneRules.trim() ? `Tone of voice rules:\n${profile.toneRules.trim()}` : "",
+    ].filter(Boolean);
+    if (additions.length) {
+      setBrandRules([profile.guidelines.trim(), ...additions].filter(Boolean).join("\n\n"));
+    }
+    setProfileMessage(`Loaded profile: ${profile.name}`);
+  }
+
+  function saveBrandProfile() {
+    if (!profileName.trim()) {
+      setProfileMessage("Enter a profile name before saving.");
+      return;
+    }
+    if (!brandRules.trim()) {
+      setProfileMessage("Enter brand guidelines before saving.");
+      return;
+    }
+
+    const profile: BrandProfile = {
+      id: selectedProfileId || crypto.randomUUID(),
+      name: profileName.trim(),
+      approvedClaims: approvedClaims.trim(),
+      restrictedTerms: restrictedTerms.trim(),
+      toneRules: toneRules.trim(),
+      guidelines: brandRules.trim(),
+    };
+
+    setBrandProfiles((previous) => {
+      const exists = previous.some((item) => item.id === profile.id);
+      return exists
+        ? previous.map((item) => item.id === profile.id ? profile : item)
+        : [profile, ...previous];
+    });
+    setSelectedProfileId(profile.id);
+    setProfileMessage(`Saved "${profile.name}" in this browser.`);
+  }
+
+  function createNewBrandProfile() {
+    setSelectedProfileId("");
+    setProfileName("");
+    setApprovedClaims("");
+    setRestrictedTerms("");
+    setToneRules("");
+    setBrandRules(defaultGuidelines);
+    setProfileMessage("Ready to create a new brand profile.");
+  }
+
+  function deleteBrandProfile() {
+    if (!selectedProfileId) return;
+    const profile = brandProfiles.find((item) => item.id === selectedProfileId);
+    if (!profile) return;
+    if (!window.confirm(`Delete the "${profile.name}" profile?`)) return;
+
+    setBrandProfiles((previous) => previous.filter((item) => item.id !== selectedProfileId));
+    createNewBrandProfile();
+    setProfileMessage(`Deleted "${profile.name}".`);
+  }
 
   function saveHistory(
     type: ReviewHistoryItem["type"],
@@ -549,6 +676,7 @@ export default function Home() {
 
           <nav className="hidden items-center gap-6 text-xs font-medium text-slate-400 md:flex">
             <a href="#overview" className="transition hover:text-white">Overview</a>
+            <a href="#brand-profiles" className="transition hover:text-white">Brand Profiles</a>
             <a href="#text-review" className="transition hover:text-white">Text analysis</a>
             <a href="#image-review" className="transition hover:text-white">Visual review</a>
             <a href="#history" className="transition hover:text-white">History</a>
@@ -795,6 +923,62 @@ export default function Home() {
           <span className="rounded-full border border-white/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-slate-500">Live workspace</span>
         </div>
         <div className="grid scroll-mt-28 gap-5 xl:grid-cols-2">
+          {/* Persistent Brand Profiles */}
+          <section id="brand-profiles" className={`${panel} bs-glass bs-enter mb-5 scroll-mt-28 p-5 sm:p-7`}>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className={labelStyle}>Workspace / 00</div>
+                <h2 className="mt-2 text-xl font-semibold">Persistent Brand Profiles</h2>
+                <p className="mt-2 text-sm text-slate-400">Save reusable brand standards and load them into text and image reviews.</p>
+              </div>
+              <span className="rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-1.5 text-xs text-cyan-200">{brandProfiles.length} saved</span>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <div>
+                <label htmlFor="saved-brand-profile" className="mb-2 block text-sm font-medium">Saved profiles</label>
+                <select id="saved-brand-profile" value={selectedProfileId} onChange={(event) => {
+                  const profile = brandProfiles.find((item) => item.id === event.target.value);
+                  if (profile) applyBrandProfile(profile);
+                  else createNewBrandProfile();
+                }} className="bs-control w-full rounded-xl border border-white/10 bg-[#080c14] px-4 py-3 text-sm text-slate-200 outline-none focus:border-cyan-300/50">
+                  <option value="">Select a saved profile</option>
+                  {brandProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="brand-profile-name" className="mb-2 block text-sm font-medium">Profile name</label>
+                <input id="brand-profile-name" value={profileName} onChange={(event) => setProfileName(event.target.value)} maxLength={80} placeholder="e.g. Acme — Trust-first" className="bs-control w-full rounded-xl border border-white/10 bg-[#080c14] px-4 py-3 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-cyan-300/50" />
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div>
+                <label htmlFor="approved-claims" className="mb-2 block text-sm font-medium">Approved claims and facts</label>
+                <textarea id="approved-claims" value={approvedClaims} onChange={(event) => setApprovedClaims(event.target.value)} maxLength={3000} rows={3} placeholder="One approved claim per line" className="bs-control w-full rounded-xl border border-white/10 bg-[#080c14]/90 px-4 py-3 text-sm leading-6 text-slate-200 outline-none placeholder:text-slate-600 focus:border-cyan-300/50" />
+              </div>
+              <div>
+                <label htmlFor="restricted-terms" className="mb-2 block text-sm font-medium">Restricted words and phrases</label>
+                <textarea id="restricted-terms" value={restrictedTerms} onChange={(event) => setRestrictedTerms(event.target.value)} maxLength={3000} rows={3} placeholder="One restricted term or phrase per line" className="bs-control w-full rounded-xl border border-white/10 bg-[#080c14]/90 px-4 py-3 text-sm leading-6 text-slate-200 outline-none placeholder:text-slate-600 focus:border-cyan-300/50" />
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label htmlFor="tone-rules" className="mb-2 block text-sm font-medium">Tone of voice rules</label>
+              <textarea id="tone-rules" value={toneRules} onChange={(event) => setToneRules(event.target.value)} maxLength={3000} rows={3} placeholder="Describe the brand's preferred voice and style" className="bs-control w-full rounded-xl border border-white/10 bg-[#080c14]/90 px-4 py-3 text-sm leading-6 text-slate-200 outline-none placeholder:text-slate-600 focus:border-cyan-300/50" />
+            </div>
+
+            <p className="mt-3 text-xs leading-5 text-slate-500">Brand guidelines are saved with the profile. Loading a profile combines its approved claims, restricted terms and tone rules with the guidelines used by the AI review.</p>
+            {profileMessage && <p role="status" className="mt-3 text-sm text-cyan-200">{profileMessage}</p>}
+
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button type="button" onClick={saveBrandProfile} disabled={!profilesLoaded} className="rounded-xl bg-gradient-to-r from-cyan-200 to-sky-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50">{selectedProfileId ? "Update profile" : "Save new profile"}</button>
+              <button type="button" onClick={createNewBrandProfile} className="rounded-xl border border-white/10 px-4 py-3 text-sm text-slate-200 hover:bg-white/[0.05]">+ New profile</button>
+              <button type="button" onClick={deleteBrandProfile} disabled={!selectedProfileId} className="rounded-xl border border-red-400/20 px-4 py-3 text-sm text-red-300 hover:bg-red-400/[0.08] disabled:cursor-not-allowed disabled:opacity-40">Delete profile</button>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">Profiles are stored in this browser only and are not synced across devices.</p>
+          </section>
+
           {/* Text analysis */}
           <section id="text-review" className={`${panel} bs-glass bs-enter bs-delay-3 scroll-mt-28 p-5 sm:p-7`}>
             <div className="mb-6 flex items-start justify-between gap-4">
