@@ -215,6 +215,7 @@ export default function Home() {
 
   const [history, setHistory] = useState<ReviewHistoryItem[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [selectedReviewIds, setSelectedReviewIds] = useState<string[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -667,6 +668,8 @@ export default function Home() {
 
   const totalIssues = textFindings.length + imageFindings.length;
   const hasReport = Boolean(textSummary || imageReview);
+  const selectedReviews = history.filter((item) => selectedReviewIds.includes(item.id));
+  const chronologicalHistory = [...history].reverse();
 
   return (
     <main className="brandsentinel-page min-h-screen overflow-x-hidden bg-[#070910] text-slate-100">
@@ -724,6 +727,8 @@ export default function Home() {
             <a href="#brand-profiles" className="transition hover:text-white">Brand Profiles</a>
             <a href="#text-review" className="transition hover:text-white">Text analysis</a>
             <a href="#image-review" className="transition hover:text-white">Visual review</a>
+            <a href="#brand-profiles" className="transition hover:text-white">Brand Profiles</a>
+            <a href="#campaign-dashboard" className="transition hover:text-white">Campaign trends</a>
             <a href="#history" className="transition hover:text-white">History</a>
           </nav>
 
@@ -846,6 +851,126 @@ export default function Home() {
             </button>
           </div>
         )}
+
+        {/* Campaign Comparison & Trend Dashboard */}
+        <section id="campaign-dashboard" className={`${panel} bs-glass bs-enter mb-5 scroll-mt-28 p-5 sm:p-7`}>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className={labelStyle}>Workspace / 04</div>
+              <h2 className="mt-2 text-xl font-semibold">Campaign comparison & trends</h2>
+              <p className="mt-2 max-w-2xl text-sm text-slate-400">
+                Compare saved reviews, spot recurring risk categories, and follow compliance-score trends over time.
+              </p>
+            </div>
+            <span className="rounded-full border border-violet-300/20 bg-violet-300/[0.06] px-3 py-1.5 text-xs text-violet-200">
+              {history.length} reviews available
+            </span>
+          </div>
+
+          {history.length === 0 ? (
+            <div className="mt-5 rounded-xl border border-dashed border-white/10 p-6 text-center">
+              <p className="text-sm font-medium text-slate-300">Your dashboard is waiting for reviews</p>
+              <p className="mt-2 text-xs leading-5 text-slate-500">Complete at least one text or image review. Saved reviews will appear here automatically.</p>
+            </div>
+          ) : (
+            <>
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-4">
+                  <div className="text-xs text-slate-500">Total saved reviews</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">{history.length}</div>
+                </div>
+                <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-4">
+                  <div className="text-xs text-slate-500">Total recorded findings</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">{history.reduce((sum, item) => sum + item.findings.length, 0)}</div>
+                </div>
+                <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-4">
+                  <div className="text-xs text-slate-500">Average compliance score</div>
+                  <div className="mt-2 text-2xl font-semibold text-cyan-200">
+                    {Math.round(history.reduce((sum, item) => sum + getComplianceScore(item.findings).score, 0) / history.length)}/100
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-100">Compare reviews</h3>
+                    <p className="mt-1 text-xs text-slate-500">Select up to four saved reviews.</p>
+                  </div>
+                  <button type="button" onClick={() => setSelectedReviewIds([])} className="text-xs text-slate-400 hover:text-white">Clear selection</button>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {history.map((item) => {
+                    const checked = selectedReviewIds.includes(item.id);
+                    const disabled = !checked && selectedReviewIds.length >= 4;
+                    return (
+                      <label key={item.id} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 ${checked ? "border-cyan-300/30 bg-cyan-300/[0.06]" : "border-white/[0.08] bg-white/[0.02]"} ${disabled ? "cursor-not-allowed opacity-40" : ""}`}>
+                        <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => setSelectedReviewIds((previous) => event.target.checked ? [...previous, item.id].slice(-4) : previous.filter((id) => id !== item.id))} className="mt-1 accent-cyan-300" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium text-slate-200">{item.type}</span>
+                          <span className="mt-1 block text-xs text-slate-500">{new Date(item.createdAt).toLocaleString()}</span>
+                          <span className="mt-1 block text-xs text-slate-400">{item.findings.length} findings · Score {getComplianceScore(item.findings).score}/100</span>
+                          <span className="mt-1 block line-clamp-2 text-xs leading-5 text-slate-500">{item.summary}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                {selectedReviews.length > 0 && (
+                  <div className="mt-4 overflow-x-auto rounded-xl border border-white/[0.08]">
+                    <table className="w-full min-w-[560px] text-left text-sm">
+                      <thead className="bg-white/[0.035] text-xs text-slate-400">
+                        <tr><th className="p-3 font-medium">Review</th><th className="p-3 font-medium">Score</th><th className="p-3 font-medium">High</th><th className="p-3 font-medium">Medium</th><th className="p-3 font-medium">Low</th><th className="p-3 font-medium">Total</th></tr>
+                      </thead>
+                      <tbody>
+                        {selectedReviews.map((item) => {
+                          const counts = getSeverityCounts(item.findings);
+                          return <tr key={item.id} className="border-t border-white/[0.07]">
+                            <td className="p-3"><div className="font-medium text-slate-200">{item.type}</div><div className="mt-1 text-xs text-slate-500">{new Date(item.createdAt).toLocaleDateString()}</div></td>
+                            <td className="p-3 font-semibold text-cyan-200">{getComplianceScore(item.findings).score}/100</td>
+                            <td className="p-3 text-red-300">{counts.High}</td><td className="p-3 text-amber-300">{counts.Medium}</td><td className="p-3 text-sky-300">{counts.Low}</td><td className="p-3 text-slate-200">{item.findings.length}</td>
+                          </tr>;
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-7">
+                <h3 className="text-sm font-semibold text-slate-100">Compliance trend</h3>
+                <p className="mt-1 text-xs text-slate-500">Historical scores are based on saved findings. Higher scores mean fewer severity-weighted findings.</p>
+                <div className="mt-4 space-y-3">
+                  {chronologicalHistory.slice(-10).map((item) => {
+                    const score = getComplianceScore(item.findings).score;
+                    return <div key={item.id} className="grid grid-cols-[88px_minmax(0,1fr)_44px] items-center gap-3">
+                      <div className="text-xs text-slate-500">{new Date(item.createdAt).toLocaleDateString()}</div>
+                      <div className="h-3 overflow-hidden rounded-full bg-white/[0.07]" role="img" aria-label={`Compliance score ${score} out of 100`}>
+                        <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-violet-300" style={{ width: `${score}%` }} />
+                      </div>
+                      <div className="text-right text-xs font-semibold text-slate-200">{score}</div>
+                    </div>;
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="text-sm font-semibold text-slate-100">Recurring issue categories</h3>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {(["Claims & accuracy", "Brand voice", "Restricted language", "Other risks"] as ComplianceCategory[]).map((category) => {
+                    const count = history.reduce((sum, item) => sum + item.findings.filter((finding) => getComplianceCategory(finding) === category).length, 0);
+                    return <div key={category} className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
+                      <div className="flex items-center justify-between gap-3"><span className="text-sm text-slate-300">{category}</span><span className="text-sm font-semibold text-cyan-200">{count}</span></div>
+                      <div className="mt-2 text-xs text-slate-500">{count === 0 ? "No findings recorded" : `${count} finding${count === 1 ? "" : "s"} across saved reviews`}</div>
+                    </div>;
+                  })}
+                </div>
+              </div>
+              <p className="mt-5 text-xs leading-5 text-slate-500">Dashboard data comes from this browser's saved review history only. It is not shared across devices. Compliance scores are heuristic indicators, not guarantees of legal or factual compliance.</p>
+            </>
+          )}
+        </section>
 
         {/* Review History */}
         <section id="history" className={`${panel} bs-glass bs-enter bs-delay-2 mb-5 scroll-mt-28 p-5 sm:p-7`}>
